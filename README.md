@@ -1,6 +1,6 @@
 # Rate Limiting Pattern
 
-Many services use [throttling](./throttling.md) to control the consumption of resources. As a consumer of a service that imposes this limitation, you might choose to rate limit operations to that service. This will help you avoid or minimize throttling errors and help you more accurately predict throughput.
+Many services use [throttling](https://docs.microsoft.com/en-us/azure/architecture/patterns/throttling) to control the consumption of resources. As a consumer of a service that imposes this limitation, you might choose to rate limit operations to that service. This will help you avoid or minimize throttling errors and help you more accurately predict throughput.
 
 While rate limiting may be appropriate in many scenarios, it is a pattern that is particularly helpful for batch processing.
 
@@ -80,4 +80,48 @@ Use this pattern:
 
 ## Example
 
+An application allows users to submit records of various types to an API. There is a unique job processor for each record type that perform the following steps:
+
+1. validation
+1. enrichment
+1. insert record to database
+
+All components of the application (API, job processor A, and job processor B) are separate processes that may be scaled independently. The processes do not directly communicate with one another.
+
+The diagram shows the following workflow:
+
+1. A user submits 10,000 records of type A to the API.
+1. The API enqueues those 10,000 records in Queue A.
+1. A user submits 5,000 records of type B to the API.
+1. The API enqueues those 5,000 records in Queue B.
+1. Job Processor A sees Queue A has records and tries to gain an exclusive lease on blob 2.
+1. Job Processor B sees Queue B has records and tries to gain an exclusive lease on blob 2.
+1. Job Processor A fails to obtain the lease.
+1. Job Processor B obtains the lease on blob 2 for 15 seconds. It can now rate limit requests to the database at a rate of 100 per second.
+1. Job Processor B dequeues 100 records from Queue B and writes them.
+1. 1 second passes.
+1. Job Processor A sees Queue A has more records and tries to gain an exclusive lease on blob 6.
+1. Job Processor B sees Queue B has more records and tries to gain an exclusive lease on blob 3.
+1. Job Processor A obtains the lease on blob 6 for 15 seconds. It can now rate limit requests to the database at a rate of 100 per second.
+1. Job Processor B obtains the lease on blob 3 for 15 seconds. It can now rate limit requests to the database at a rate of 200 per second (it also holds the lease for blob 2).
+1. Job Processor A dequeues 100 records from Queue A and writes them.
+1. Job Processor B dequeues 200 records from Queue B and writes them.
+1. 1 second passes.
+1. Job Processor A sees Queue A has more records and tries to gain an exclusive lease on blob 0.
+1. Job Processor B sees Queue B has more records and tries to gain an exclusive lease on blob 1.
+1. Job Processor A obtains the lease on blob 0 for 15 seconds. It can now rate limit requests to the database at a rate of 200 per second (it also holds the lease for blob 6).
+1. Job Processor B obtains the lease on blob 1 for 15 seconds. It can now rate limit requests to the database at a rate of 300 per second (it also holds the lease for blobs 2 and 3).
+1. Job Processor A dequeues 200 records from Queue A and writes them.
+1. Job Processor B dequeues 300 records from Queue B and writes them.
+1. And so on...
+
+After 15 seconds, one or both jobs still will not be completed. As the leases expire, a processor should also reduce the number of requests it dequeues and write.
+
+![example workflow](./workflow-2.png)
+
 ## Related patterns and guidance
+
+The following patterns and guidance might also be relevant when implementing this pattern:
+
+- [Throttling](https://docs.microsoft.com/en-us/azure/architecture/patterns/throttling). The rate limiting pattern discussed here is typically implemented in response to a service that is throttled.
+- [Retry](https://docs.microsoft.com/en-us/azure/architecture/patterns/retry). When throttling errors are raised by the throttled service it is generally appropriate to retry those after an appropriate interval.
