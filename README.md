@@ -88,6 +88,8 @@ An application allows users to submit records of various types to an API. There 
 
 All components of the application (API, job processor A, and job processor B) are separate processes that may be scaled independently. The processes do not directly communicate with one another.
 
+![example workflow](./workflow-2.png)
+
 The diagram shows the following workflow:
 
 1. A user submits 10,000 records of type A to the API.
@@ -116,8 +118,6 @@ The diagram shows the following workflow:
 1. And so on...
 
 After 15 seconds, one or both jobs still will not be completed. As the leases expire, a processor should also reduce the number of requests it dequeues and write.
-
-![example workflow](./workflow-2.png)
 
 ## Related patterns and guidance
 
