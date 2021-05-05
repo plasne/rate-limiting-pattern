@@ -34,10 +34,6 @@ A service may throttle based on different metrics over a period of time, such as
 
 Regardless of the metric used for throttling, the implementation of rate limiting will involve controlling the number and/or size of operations sent to the service in a period of time.
 
-The time period used for releasing records may be more granular than the period the service throttles on. While this is not required, it is often recommended to improve throughput. For instance, if a service allows 100 records per second, the implementation of a rate limiter may release 20 records every 200 milliseconds. The following graph shows what this might look like:
-
-![rate limited flow](./flow.png)
-
 Often the throttled service will need to accept records at a slower rate than the API might accept them. If you simply consider this a data rate mismatch problem and buffer in your application you may be introducing the possibility that data could be lost if your application crashes. Instead consider sending the records to a durable messaging system that can handle your full ingestion rate (services such as Azure Event Hubs can handle millions of operations per second). One or more job processors can read the records from the durable messaging system at a controlled rate that within the limits of the throttled service.
 
 Azure provides a number of durable messaging services that would be suitable for this pattern, including:
@@ -47,6 +43,22 @@ Azure provides a number of durable messaging services that would be suitable for
 - [Azure Event Hubs](https://azure.microsoft.com/en-us/services/event-hubs/)
 
 ![service bus workflow](./workflow-1.png)
+
+The time period used for releasing records may be more granular than the period the service throttles on. While this is not required, it is often recommended to improve throughput. For instance, if a service allows 100 records per second, the implementation of a rate limiter may release 20 records every 200 milliseconds. The following graph shows what this might look like:
+
+![rate limited flow](./flow.png)
+
+It is sometimes necessary for uncoordinated processes to share the capacity of a throttled service. To accomplish this you can logically partition that capacity and then use a distributed mutual exclusion system to manage exclusive locks on those partitions. The uncoordinated processes can then compete for locks on those partitions whenever they need capacity. For each partition that a process holds a lock for, it would be granted a certain amount of capacity.
+
+For example, if the throttled system allows 500 requests per second, you might create 20 partitions worth 25 requests per second each. If a process needed to issue 100 requests, it might ask the distributed mutual exclusion system for 4 partitions. The system might grant 2 partitions for 10 seconds. The process would then rate limit to 50 requests per second, complete the task in 2 seconds, and then release the lock.
+
+Azure Storage can be used to implement a pattern like this. You can create one 0-byte blob per logical partition in a container and then obtain [exclusive leases](https://docs.microsoft.com/en-us/rest/api/storageservices/lease-blob) directly against those blobs for a short period of time (ex. 15 seconds). The application will need to track the lease time so that when it expires, it can stop using the capacity it was granted. When implementing this pattern, you often want each process that needs capacity to attempt a lease on a random partition.
+
+To reduce latency, you might allocate each process a small amount of capacity that is reserved only for that process to use. Each process would then only seek to obtain shared capacity if it needed to exceed its reserved capacity.
+
+![azure blob partitions](./azure-blob-partitions.png)
+
+:notebook: This is one implementation of a lease management system. A similar process could be implemented using Zookeeper, Consul, etcd, Redis/Redsync, and others.
 
 ## Issues and considerations
 
